@@ -1,0 +1,26 @@
+UNO RECEIVER (Ground Station) CONNECTIONS:
+
+UNO PIN → CONNECTS TO
+─────────────────────────────────
+D8  → NRF24L01 CSN (pin 4)
+D7  → NRF24L01 CE (pin 3)
+D11 → NRF24L01 MOSI (pin 6)
+D12 → NRF24L01 MISO (pin 7)
+D13 → NRF24L01 SCK (pin 5)
+
+3.3V → NRF24L01 VCC (pin 2)
+GND  → NRF24L01 GND (pin 1)
+
+USB → Computer for Serial Monitor
+
+UNO NRF24L01 Connections (Same as NANO):
+NRF24L01 PIN → UNO PIN
+───────────────────────
+1 GND       → GND
+2 VCC       → 3.3V
+3 CE        → D7
+4 CSN       → D8
+5 SCK       → D13
+6 MOSI      → D11
+7 MISO      → D12
+8 IRQ       → NOT CONNECTED
