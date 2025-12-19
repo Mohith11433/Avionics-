@@ -50,3 +50,4 @@ BMP280 SCL  → A5 (same wire)
 MPU6050 VCC → 5V
 BMP280 VCC  → 5V
 BOTH GND    → GND
+
