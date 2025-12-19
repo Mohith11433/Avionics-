@@ -1,0 +1,184 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+RF24 radio(7, 8);
+const byte address[6] = "ROCK1";
+
+struct RawData {
+  uint32_t packetNum;
+  float altitude;
+  float pressure;
+  float temperature;
+  float accelX, accelY, accelZ;
+  float gyroX, gyroY, gyroZ;
+  uint8_t flightState;
+  uint8_t servoPosition;
+  uint8_t deploymentTriggered;
+  float verticalVelocity;
+};
+
+RawData raw;
+uint32_t packets = 0;
+
+// Calibration
+float altitudeOffset = 0;
+bool isCalibrated = false;
+
+// Calculated values
+float calibratedAltitude = 0;
+float gForce = 1.0;
+float netThrust = 0;
+float maxAltitude = 0;
+
+void calibrateAll() {
+  altitudeOffset = raw.altitude;
+  isCalibrated = true;
+  
+  Serial.println("✅ Calibrated! Altitude set to 0m");
+  Serial.print("Acc Z: ");
+  Serial.print(raw.accelZ, 1);
+  Serial.println(" m/s² (should be ~9.8)");
+  delay(1000);
+}
+
+void calculateValues() {
+  if (!isCalibrated) return;
+  
+  calibratedAltitude = raw.altitude - altitudeOffset;
+  
+  // G-Force
+  float totalAcc = sqrt(raw.accelX*raw.accelX + 
+                       raw.accelY*raw.accelY + 
+                       raw.accelZ*raw.accelZ);
+  gForce = totalAcc / 9.81;
+  
+  // Net Thrust (remove gravity)
+  netThrust = raw.accelZ - 9.81;
+  
+  // Max altitude
+  if (calibratedAltitude > maxAltitude) {
+    maxAltitude = calibratedAltitude;
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);
+  
+  Serial.println("\n\n\n\n\n");
+  Serial.println("🚀 UNO - ROCKET GROUND STATION");
+  Serial.println("==============================");
+  Serial.println("Press 'A' to calibrate");
+  Serial.println();
+  
+  radio.begin();
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+  radio.setChannel(76);
+  radio.setAutoAck(false);
+  radio.setRetries(0, 0);
+  radio.setPayloadSize(sizeof(raw));
+  radio.openReadingPipe(0, address);
+  radio.startListening();
+}
+
+void loop() {
+  if (Serial.available()) {
+    char cmd = Serial.read();
+    if (cmd == 'A' || cmd == 'a') calibrateAll();
+  }
+  
+  if (radio.available()) {
+    radio.read(&raw, sizeof(raw));
+    packets++;
+    
+    calculateValues();
+    displayData();
+  }
+  
+  delay(10);
+}
+
+void displayData() {
+  Serial.println("\n\n\n\n\n");
+  
+  Serial.println("========================================");
+  Serial.print("PKT#");
+  Serial.print(raw.packetNum);
+  
+  switch(raw.flightState) {
+    case 0: Serial.print(" | PAD    "); break;
+    case 1: Serial.print(" | ASCENT "); break;
+    case 2: Serial.print(" | DESCENT"); break;
+    case 3: Serial.print(" | DEPLOY "); break;
+  }
+  
+  Serial.print(" | Vel:");
+  Serial.print(raw.verticalVelocity, 1);
+  Serial.println("m/s");
+  Serial.println("========================================");
+  
+  // FLIGHT DATA
+  Serial.print("ALT: ");
+  Serial.print(calibratedAltitude, 1);
+  Serial.print("m | MAX: ");
+  Serial.print(maxAltitude, 1);
+  Serial.print("m | G: ");
+  Serial.print(gForce, 2);
+  Serial.println("g");
+  
+  Serial.print("THRUST: ");
+  Serial.print(netThrust, 2);
+  Serial.print("m/s² | Servo: ");
+  Serial.print(raw.servoPosition);
+  Serial.println("°");
+  
+  if (raw.deploymentTriggered) {
+    Serial.println("✅ PARACHUTE DEPLOYED!");
+  }
+  
+  Serial.println("----------------------------------------");
+  
+  // ACCELEROMETER
+  Serial.println("ACC (m/s²):");
+  Serial.print("X: ");
+  Serial.print(raw.accelX, 1);
+  Serial.print(" | Y: ");
+  Serial.print(raw.accelY, 1);
+  Serial.print(" | Z: ");
+  Serial.print(raw.accelZ, 1);
+  Serial.println();
+  
+  // GYROSCOPE (filter small drifts)
+  Serial.println("GYRO (°/s):");
+  float gx = abs(raw.gyroX) > 1.0 ? raw.gyroX : 0;
+  float gy = abs(raw.gyroY) > 1.0 ? raw.gyroY : 0;
+  float gz = abs(raw.gyroZ) > 1.0 ? raw.gyroZ : 0;
+  
+  Serial.print("X: ");
+  Serial.print(gx, 1);
+  Serial.print(" | Y: ");
+  Serial.print(gy, 1);
+  Serial.print(" | Z: ");
+  Serial.print(gz, 1);
+  Serial.println();
+  
+  Serial.println("----------------------------------------");
+  
+  // ENVIRONMENT
+  Serial.print("TEMP: ");
+  Serial.print(raw.temperature, 1);
+  Serial.print("°C | PRESS: ");
+  Serial.print(raw.pressure, 1);
+  Serial.println("hPa");
+  
+  // DEPLOYMENT COUNTDOWN
+  if (raw.flightState == 2 && !raw.deploymentTriggered && calibratedAltitude > 100) {
+    Serial.print("Deploy in: ");
+    Serial.print(calibratedAltitude - 100, 0);
+    Serial.println("m");
+  }
+  
+  Serial.println("========================================");
+}
