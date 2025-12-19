@@ -1,0 +1,52 @@
+
+NANO PIN → CONNECTS TO
+─────────────────────────────────
+D8  → NRF24L01 CSN (pin 4)
+D7  → NRF24L01 CE (pin 3)
+D9  → SERVO SIGNAL (Orange wire)
+D10 → RESERVED / FUTURE SERVO 2
+D11 → NRF24L01 MOSI (pin 6)
+D12 → NRF24L01 MISO (pin 7)
+D13 → NRF24L01 SCK (pin 5)
+
+A4 (SDA) → MPU6050 SDA + BMP280 SDA
+A5 (SCL) → MPU6050 SCL + BMP280 SCL
+
+5V       → MPU6050 VCC + BMP280 VCC
+3.3V     → NRF24L01 VCC (pin 2)
+
+GND      → ALL: NRF GND (pin 1) + MPU GND + BMP GND + Servo Brown
+
+POWER:
+Power Bank 5V → NANO Vin/VCC (for logic)
+18650 → MT3608 Boost → 5V → Servo Red wire
+Servo Brown → Common GND
+
+NRF24L01 Module Pinout:
+NRF24L01 PIN → NANO PIN
+───────────────────────
+1 GND       → GND
+2 VCC       → 3.3V
+3 CE        → D7
+4 CSN       → D8
+5 SCK       → D13
+6 MOSI      → D11
+7 MISO      → D12
+8 IRQ       → NOT CONNECTED
+
+Servo Connection:
+SERVO WIRE → NANO PIN
+─────────────────────
+Orange (Signal) → D9
+Red (Power)     → 5V from 18650 (NOT from NANO!)
+Brown (Ground)  → GND
+
+I2C Sensors (MPU6050 & BMP280):
+SHARED I2C BUS:
+MPU6050 SDA → A4
+MPU6050 SCL → A5
+BMP280 SDA  → A4 (same wire)
+BMP280 SCL  → A5 (same wire)
+MPU6050 VCC → 5V
+BMP280 VCC  → 5V
+BOTH GND    → GND
