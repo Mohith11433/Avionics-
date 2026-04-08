@@ -1,0 +1,183 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+#include <Servo.h>
+#include <Wire.h>
+#include <Adafruit_BMP280.h>
+#include <MPU6050.h>
+
+#define CE_PIN 7
+#define CSN_PIN 8
+#define SERVO_PIN 9
+#define LED_PIN 13
+
+RF24 radio(CE_PIN, CSN_PIN);
+Servo myServo;
+Adafruit_BMP280 bmp;
+MPU6050 mpu;
+const byte address[6] = "ROCK1";
+
+// Data structure
+struct SensorData {
+  uint32_t packetNum;
+  int16_t altitude;
+  int16_t pressure;
+  int16_t temperature;
+  int16_t accX;
+  int16_t accY;
+  int16_t accZ;
+  int16_t gyroX;
+  int16_t gyroY;
+  int16_t gyroZ;
+  int16_t servoPos;
+};
+
+SensorData data;
+uint32_t packetCount = 0;
+int servoAngle = 0;
+unsigned long lastSend = 0;
+unsigned long lastCmdCheck = 0;
+float altOffset = 0;
+
+// MPU calibration
+int16_t axOff=0, ayOff=0, azOff=0;
+int16_t gxOff=0, gyOff=0, gzOff=0;
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
+  
+  Wire.begin();
+  Wire.setClock(400000);
+  SPI.begin();
+  
+  // BMP280
+  if(!bmp.begin(0x76)) bmp.begin(0x77);
+  
+  // MPU6050
+  mpu.initialize();
+  mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_250);
+  mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
+  mpu.setSleepEnabled(false);
+  
+  // Calibrate MPU
+  Serial.println("Calibrating - Keep STILL!");
+  delay(2000);
+  
+  long ax=0, ay=0, az=0, gx=0, gy=0, gz=0;
+  int samples = 200;
+  for(int i=0;i<samples;i++){
+    int16_t ax1,ay1,az1,gx1,gy1,gz1;
+    mpu.getMotion6(&ax1,&ay1,&az1,&gx1,&gy1,&gz1);
+    ax+=ax1; ay+=ay1; az+=az1;
+    gx+=gx1; gy+=gy1; gz+=gz1;
+    delay(3);
+  }
+  axOff = ax/samples;
+  ayOff = ay/samples;
+  azOff = (az/samples) - 16384;
+  gxOff = gx/samples;
+  gyOff = gy/samples;
+  gzOff = gz/samples;
+  
+  // Calibrate BMP altitude
+  float sum = 0;
+  for(int i=0;i<20;i++) {
+    sum += bmp.readAltitude(1013.25);
+    delay(50);
+  }
+  altOffset = sum / 20;
+  
+  // Servo
+  myServo.attach(SERVO_PIN);
+  myServo.write(0);
+  
+  // Radio - Listen for commands
+  radio.begin();
+  radio.setChannel(76);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+  radio.setPayloadSize(sizeof(SensorData));
+  radio.openWritingPipe(address);
+  radio.openReadingPipe(1, address);
+  radio.startListening();
+  
+  digitalWrite(LED_PIN, LOW);
+  
+  for(int i=0;i<3;i++) {
+    digitalWrite(LED_PIN, HIGH);
+    delay(100);
+    digitalWrite(LED_PIN, LOW);
+    delay(100);
+  }
+  
+  Serial.println("NANO READY");
+}
+
+void loop() {
+  unsigned long now = millis();
+  
+  // Read sensors
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  
+  float altValue = bmp.readAltitude(1013.25) - altOffset;
+  float pressValue = bmp.readPressure() / 100.0;
+  float tempValue = bmp.readTemperature();
+  float accX = (ax - axOff) / 16384.0;
+  float accY = (ay - ayOff) / 16384.0;
+  float accZ = (az - azOff) / 16384.0;
+  float gyroX = (gx - gxOff) / 131.0;
+  float gyroY = (gy - gyOff) / 131.0;
+  float gyroZ = (gz - gzOff) / 131.0;
+  
+  // Pack data
+  data.packetNum = packetCount;
+  data.altitude = (int16_t)(altValue * 10);
+  data.pressure = (int16_t)(pressValue * 10);
+  data.temperature = (int16_t)(tempValue * 10);
+  data.accX = (int16_t)(accX * 100);
+  data.accY = (int16_t)(accY * 100);
+  data.accZ = (int16_t)(accZ * 100);
+  data.gyroX = (int16_t)(gyroX * 10);
+  data.gyroY = (int16_t)(gyroY * 10);
+  data.gyroZ = (int16_t)(gyroZ * 10);
+  data.servoPos = servoAngle;
+  
+  // Send data every 250ms (4Hz)
+  if(now - lastSend >= 250) {
+    lastSend = now;
+    
+    radio.stopListening();
+    radio.write(&data, sizeof(data));
+    radio.startListening();
+    packetCount++;
+    
+    // Quick LED blink
+    digitalWrite(LED_PIN, HIGH);
+    delay(5);
+    digitalWrite(LED_PIN, LOW);
+  }
+  
+  // Check for servo commands
+  if(radio.available()) {
+    char cmd;
+    radio.read(&cmd, sizeof(cmd));
+    
+    if(cmd == '0') {
+      servoAngle = 0;
+      myServo.write(0);
+      Serial.println("SERVO:0");
+    }
+    else if(cmd == '1') {
+      servoAngle = 180;
+      myServo.write(180);
+      Serial.println("SERVO:180");
+    }
+  }
+  
+  delay(2);
+}
