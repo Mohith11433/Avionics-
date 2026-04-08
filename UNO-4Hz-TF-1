@@ -1,0 +1,139 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+#define CE_PIN 7
+#define CSN_PIN 8
+#define LED_PIN 13
+
+RF24 radio(CE_PIN, CSN_PIN);
+const byte address[6] = "ROCK1";
+
+struct SensorData {
+  uint32_t packetNum;
+  int16_t altitude;
+  int16_t pressure;
+  int16_t temperature;
+  int16_t accX;
+  int16_t accY;
+  int16_t accZ;
+  int16_t gyroX;
+  int16_t gyroY;
+  int16_t gyroZ;
+  int16_t servoPos;
+};
+
+SensorData data;
+unsigned long lastPacket = 0;
+unsigned long lastDisplay = 0;
+unsigned long lastCmd = 0;
+uint32_t packets = 0;
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  
+  pinMode(LED_PIN, OUTPUT);
+  
+  radio.begin();
+  radio.setChannel(76);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+  radio.setPayloadSize(sizeof(SensorData));
+  radio.openReadingPipe(0, address);
+  radio.openWritingPipe(address);
+  radio.startListening();
+  
+  Serial.println("\n\n");
+  Serial.println("========================================");
+  Serial.println("        ROCKET GROUND STATION");
+  Serial.println("========================================");
+  Serial.println("Type 0 = ARM (0°)  |  Type 1 = DEPLOY (180°)");
+  Serial.println("========================================\n");
+}
+
+void loop() {
+  unsigned long now = millis();
+  
+  // Send servo command
+  if(Serial.available() && (now - lastCmd > 300)) {
+    char c = Serial.read();
+    if(c == '0' || c == '1') {
+      lastCmd = now;
+      
+      radio.stopListening();
+      radio.write(&c, sizeof(c));
+      radio.startListening();
+      
+      Serial.print("CMD: ");
+      Serial.println(c == '0' ? "ARM (0°)" : "DEPLOY (180°)");
+    }
+  }
+  
+  // Receive data
+  if(radio.available()) {
+    radio.read(&data, sizeof(data));
+    lastPacket = now;
+    packets++;
+    
+    float altitude = data.altitude / 10.0;
+    float pressure = data.pressure / 10.0;
+    float temperature = data.temperature / 10.0;
+    float accX = data.accX / 100.0;
+    float accY = data.accY / 100.0;
+    float accZ = data.accZ / 100.0;
+    float gyroX = data.gyroX / 10.0;
+    float gyroY = data.gyroY / 10.0;
+    float gyroZ = data.gyroZ / 10.0;
+    
+    if(now - lastDisplay >= 250) {
+      lastDisplay = now;
+      
+      Serial.println("\n========================================");
+      Serial.println("           ROCKET TELEMETRY");
+      Serial.println("========================================");
+      
+      Serial.print("Packet: "); Serial.println(data.packetNum);
+      
+      Serial.println("----------------------------------------");
+      Serial.println("ENVIRONMENT (BMP280):");
+      Serial.print("  Altitude: "); Serial.print(altitude, 2); Serial.println(" m");
+      Serial.print("  Pressure: "); Serial.print(pressure, 1); Serial.println(" hPa");
+      Serial.print("  Temperature: "); Serial.print(temperature, 1); Serial.println(" C");
+      
+      Serial.println("----------------------------------------");
+      Serial.println("ACCELEROMETER (MPU6050):");
+      Serial.print("  X: "); Serial.print(accX, 3);
+      Serial.print(" g    Y: "); Serial.print(accY, 3);
+      Serial.print(" g    Z: "); Serial.print(accZ, 3); Serial.println(" g");
+      
+      Serial.println("----------------------------------------");
+      Serial.println("GYROSCOPE (MPU6050):");
+      Serial.print("  X: "); Serial.print(gyroX, 1);
+      Serial.print(" deg/s    Y: "); Serial.print(gyroY, 1);
+      Serial.print(" deg/s    Z: "); Serial.print(gyroZ, 1); Serial.println(" deg/s");
+      
+      Serial.println("----------------------------------------");
+      Serial.print("SERVO: ");
+      if(data.servoPos == 180) {
+        Serial.println("DEPLOYED (180°)");
+      } else {
+        Serial.println("ARMED (0°)");
+      }
+      Serial.println("========================================\n");
+    }
+  }
+  
+  // Signal loss
+  static bool wasLost = false;
+  if(now - lastPacket > 2000) {
+    if(!wasLost) {
+      Serial.println("\n⚠️ SIGNAL LOSS - Waiting for rocket...\n");
+      wasLost = true;
+    }
+  } else {
+    wasLost = false;
+  }
+  
+  delay(5);
+}
